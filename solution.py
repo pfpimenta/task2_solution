@@ -11,12 +11,13 @@ import json
 import numpy as np
 from sklearn.neural_network import MLPClassifier
 
+DATASET_PATH = 'dataset/'
 NUM_DATASET_FILES = 15
 
 # percentages of train/test/validation sets
-TRAIN_RATIO = 70 
+TRAIN_RATIO = 80 
 TEST_RATIO = 20
-VAL_RATIO = 10
+#VAL_RATIO = 8 # automatically separated by scikit-learn
 
 def load_topology_data():
 	# load graph topology
@@ -24,12 +25,9 @@ def load_topology_data():
 	# = ['links', 'adjMat', 'incMat', 'list_paths',
 	# 'sd_vs_path_bin_table', 'link_vs_path_bin_table',
 	# 'node_vs_path_bin_table']
-	print(f'...opening dataset/topology.json') #debug
-	with open('dataset/topology.json') as f:
+	print(f'...opening {DATASET_PATH}topology.json') #debug
+	with open(f'{DATASET_PATH}topology.json') as f:
 		topology_data = json.load(f)
-		# print(topology_data)
-		# print(type(topology_data))
-		# print(topology_data.keys())
 	return topology_data
 
 def load_dataset():
@@ -41,29 +39,22 @@ def load_dataset():
 	dataY = []
 
 	for i in range(0,NUM_DATASET_FILES):
-		filename = f'dataset/trace_{i}/dataset.json'
+		filename = f'{DATASET_PATH}trace_{i}/dataset.json'
 		
 		print(f'...opening {filename}') #debug
 
 		with open(filename) as f:
 			data = json.load(f)
-			# print(type(data)) # class 'dict'
-			# print(data.keys()) # 'X', 'y'
-			# print(type(data['y'])) # list of list of float
-			# print(type(data['y'][0])) # list of float
-			# print(type(data['y'][0][0])) # float
-
 			dataX = dataX + data['X'] # features (input)
 			dataY = dataY + data['y'] # labels (output)
 
 	# put into numpy arrays
-	x = np.array(dataX)
-	y = np.array(dataY)
+	dataX = np.array(dataX)
+	dataY = np.array(dataY)
 
 	return dataX, dataY
 
 def dataset_split(dataX, dataY):
-	# TODO : MUDAR PRA NUMPY ARRAYS
 	# this function receives the dataset in two
 	# list of lists (dataX: input features,
 	# dataY: output labels) and splits it
@@ -76,19 +67,17 @@ def dataset_split(dataX, dataY):
 
 	# train/test/val set sizes
 	train_size = int(num_samples*TRAIN_RATIO/100)
-	test_size = int(num_samples*TEST_RATIO/100)
-	val_size = num_samples - train_size - test_size #int(num_samples*VAL_RATIO/100)
-	print(f'train : {train_size}, test : {test_size}, val : {val_size}') # debug
+	test_size = num_samples - train_size # int(num_samples*TEST_RATIO/100)
+	#val_size = num_samples - train_size - test_size #int(num_samples*VAL_RATIO/100)
+	print(f'train : {train_size}, test : {test_size}')#, val : {val_size}') # debug
 
 	# do the split
 	trainX = dataX[0:train_size]
 	trainY = dataY[0:train_size]
 	testX = dataX[train_size:train_size+test_size]
 	testY = dataY[train_size:train_size+test_size]
-	valX = dataX[train_size+test_size:]
-	valY = dataY[train_size+test_size:]
 	
-	return trainX, trainY, testX, testY, valX, valY
+	return trainX, trainY, testX, testY#, valX, valY
 
 def print_dataset_debug(dataX, dataY):
 	# function for debugging
@@ -99,8 +88,6 @@ def print_dataset_debug(dataX, dataY):
 	# print feature and label size
 	print(f'feature size : {len(dataX[0])}')
 	print(f'label size : {len(dataY[0])}') 
-
-	# aaaaa TODO arrumar essa merda
 	
 	# print feature basic statistics
 	for i in range(len(x[0])):
@@ -123,7 +110,7 @@ def test_model(model, testX, testY):
 	num_total_samples = len(testX)
 
 	# testing
-	print("...testing")
+	print("\ntesting...")
 	errors = []
 	for i in range(num_total_samples):
 		pred = model.predict([testX[i]])
@@ -141,6 +128,29 @@ def test_model(model, testX, testY):
 	
 	return score
 
+def readable_request(src_node, dst_node, connection_volume, connection_duration):
+	# returns a readable version of a request
+	readable_string = f"connection request from node {src_node} to node {dst_node}"
+	readable_string += f" with connection volume {connection_volume} and duration {connection_duration}"
+	return readable_string
+
+def data_pre_processing(dataX):
+	# this functions takes input samples
+	# and removes its unnecessary features:
+	# - connection volume (always equal to 1)
+	# - connection total duration (irrelevant to the problem)
+	return dataX[:,0:42]
+
+
+# TODO
+def post_processing():
+	pass
+
+# TODOTODOTODOTOOTOD
+def classify_request(request):
+	# this
+	pass
+
 
 #############################3
 
@@ -150,28 +160,30 @@ if(__name__ == "__main__"):
 	# load graph topology
 	topology_data = load_topology_data()
 	# load training samples
-	dataX, dataY = load_dataset()	
+	dataX, dataY = load_dataset()
+
+	# preprocessing
+	dataX = data_pre_processing(dataX)
 
 	# print data stats and metainfo
 	#print_dataset_debug(dataX, dataY)
 
 	### SPLIT DATASET : (training/test/validation)
-	trainX, trainY, testX, testY, valX, valY = dataset_split(dataX, dataY)
+	#trainX, trainY, testX, testY, valX, valY = dataset_split(dataX, dataY)
+	trainX, trainY, testX, testY = dataset_split(dataX, dataY)
 
 	### TRAINING
 	# create model
-	model = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(15, 10, 5))#, random_state=1)
+	model = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(15, 10, 5), verbose=True, early_stopping=True, n_iter_no_change=20)
 
+	print("\ntraining...")
 	# fit to data (training/learning)
 	model.fit(trainX, trainY)
 
 	### TESTING
-	score = test_model(model, testX, testY)
+	#score = test_model(model, testX, testY)
+	score = model.score(testX, testY)
 	print(f'score: {score}')
 
-	### TESTING
-	score = test_model(model, valX, valY)
-	print(f'validation score hahaha: {score}')
-
-	###
-	# VALIDATION
+	################################################################# TODOTODOTODOTOOTOD
+	# example use
