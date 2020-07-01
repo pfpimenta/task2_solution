@@ -20,8 +20,6 @@ NUM_DATASET_FILES = 15
 # percentages of train/test/validation sets
 TRAIN_RATIO = 80 
 TEST_RATIO = 20
-#VAL_RATIO = 8 # automatically separated by scikit-learn
-
 
 ### functions
 
@@ -31,6 +29,7 @@ def load_topology_data():
 	# = ['links', 'adjMat', 'incMat', 'list_paths',
 	# 'sd_vs_path_bin_table', 'link_vs_path_bin_table',
 	# 'node_vs_path_bin_table']
+
 	print(f'...opening {DATASET_PATH}topology.json') #debug
 	with open(f'{DATASET_PATH}topology.json') as f:
 		topology_data = json.load(f)
@@ -73,8 +72,8 @@ def dataset_split(dataX, dataY):
 
 	# train/test set sizes
 	train_size = int(num_samples*TRAIN_RATIO/100)
-	test_size = num_samples - train_size # int(num_samples*TEST_RATIO/100)
-	print(f'train : {train_size}, test : {test_size}')
+	test_size = num_samples - train_size
+	print(f'train : {int(train_size*90/100)}, validation: {int(train_size*10/100)} test : {test_size}')
 
 	# do the split
 	trainX = dataX[0:train_size]
@@ -107,21 +106,6 @@ def print_dataset_debug(dataX, dataY):
 	# for i in range(int(num_total_samples/2)-num_show_samples, int(num_total_samples/2)):
 	# 	print(f'dataX[{i}] : {dataX[i]} --- dataY[{i}] : {dataY[i]}')
 
-def print_topology_debug(topology_data):
-	# function for debugging
-
-	for key in topology_data.keys():
-		print(f'\n {key}:')
-		# TODO
-		###########################
-
-def readable_request(src_node, dst_node, connection_volume=None, connection_duration=None):
-	# returns a readable version of a request
-	readable_string = f"connection request from node {int(src_node)} to node {int(dst_node)}"
-	if(connection_volume != None and connection_duration != None):
-		readable_string += f" with connection volume {connection_volume} and duration {connection_duration}"
-	return readable_string
-
 def sd_node_id_2_bin_array(sd_nodes, num_nodes):
 	# this function receives:
 	# - num_nodes : the number of nodes in the graph
@@ -136,6 +120,15 @@ def sd_node_id_2_bin_array(sd_nodes, num_nodes):
 		sd_bin_array[i, dst_node_id] = 1
 	
 	return sd_bin_array
+
+def s_d_ids_2_sd_id(src_node_id, dst_node_id, num_nodes):
+	# this function receives a source node id
+	# and a destination node id
+	# and returns the id corresponding to
+	# the path src->dst
+
+	sd_id = int((src_node_id+1)*(num_nodes-1) + dst_node_id - num_nodes + int(bool(src_node_id>dst_node_id)))
+	return sd_id
 
 def data_pre_processing(dataX, num_nodes):
 	# this functions takes input samples,
@@ -155,34 +148,7 @@ def data_pre_processing(dataX, num_nodes):
 
 	return dataX
 
-def s_d_ids_2_sd_id(src_node_id, dst_node_id, num_nodes):
-	# this function receives a source node id
-	# and a destination node id
-	# and returns the id corresponding to
-	# the path src->dst
-
-	sd_id = int((src_node_id+1)*(num_nodes-1) + dst_node_id - num_nodes + int(bool(src_node_id>dst_node_id)))
-	return sd_id
-
-def get_path(label, src_node_id, dst_node_id, path_list, num_nodes):
-	# this function receives a label indicating
-	# which of the 3 best paths (or none) was chosen
-	# for a connection request,
-	# the connection request source and destination nodes,
-	# and the total number of nodes in the graph,
-	# and then returns the list of nodes of the following path
-
-	sd_id = s_d_ids_2_sd_id(src_node_id, dst_node_id, num_nodes)
-	chosen_path_idx = int(np.argmax(label)) - 1
-	if(chosen_path_idx == -1):
-		# there is NO feasible path
-		return "<there is no feasible path>"
-	else:
-		# there IS a feasible path
-		path = path_list[sd_id][chosen_path_idx]
-		return path
-
-def post_processing(label):
+def label_post_processing(label):
 	# this functions receives a predicted label,
 	# corrects it if it is invalid,
 	# and then returns it
@@ -201,7 +167,7 @@ def classify_request(model, request_sample):
 	# prediction
 	predicted_label = model.predict([request_sample])[0]
 	# post processing
-	predicted_label = post_processing(predicted_label)
+	predicted_label = label_post_processing(predicted_label)
 
 	return predicted_label
 
@@ -230,6 +196,31 @@ def test_model(model, testX, testY):
 	
 	return score
 
+def get_path(label, src_node_id, dst_node_id, path_list, num_nodes):
+	# this function receives a label indicating
+	# which of the 3 best paths (or none) was chosen
+	# for a connection request,
+	# the connection request source and destination nodes,
+	# and the total number of nodes in the graph,
+	# and then returns the list of nodes of the following path
+
+	sd_id = s_d_ids_2_sd_id(src_node_id, dst_node_id, num_nodes)
+	chosen_path_idx = int(np.argmax(label)) - 1
+	if(chosen_path_idx == -1):
+		# there is NO feasible path
+		return "<there is no feasible path>"
+	else:
+		# there IS a feasible path
+		path = path_list[sd_id][chosen_path_idx]
+		return path
+
+def readable_request(src_node, dst_node, connection_volume=None, connection_duration=None):
+	# returns a readable version of a request
+	readable_string = f"connection request from node {int(src_node)} to node {int(dst_node)}"
+	if(connection_volume != None and connection_duration != None):
+		readable_string += f" with connection volume {connection_volume} and duration {connection_duration}"
+	return readable_string
+
 #############################
 ### "main"
 
@@ -242,14 +233,8 @@ if(__name__ == "__main__"):
 	dataX, dataY = load_dataset()
 
 	# preprocessing
-	#dataX = data_pre_processing(dataX)
 	num_nodes = len(topology_data['adjMat'])
 	pp_dataX = data_pre_processing(dataX, num_nodes)
-
-	# print data stats and metainfo
-	#print_dataset_debug(pp_dataX, dataY)
-	# print graph topology stats and metainfo
-	#print_topology_debug(topology_data)
 
 	### SPLIT DATASET : (training/test)
 	trainX, trainY, testX, testY = dataset_split(pp_dataX, dataY)
@@ -265,7 +250,6 @@ if(__name__ == "__main__"):
 	### TESTING
 	print("\ntesting...")
 	score = test_model(model, testX, testY)
-	#score = model.score(testX, testY)
 	print(f'... testing score: {score}')
 
 
